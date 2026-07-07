@@ -1952,3 +1952,91 @@ def reset_password():
         raise typer.Exit(0)
 
     typer.echo("Auth database deleted. Restart Unsloth Studio to get a new password.")
+
+
+@studio_app.command()
+def mcp(
+    enable: List[str] = typer.Option(
+        None,
+        "--enable",
+        help = (
+            "Feature group to expose (repeatable): models, data, train, export, recipe. "
+            "Defaults to all. Pass e.g. --enable models --enable data for a read-only profile."
+        ),
+    ),
+    disable: List[str] = typer.Option(
+        None,
+        "--disable",
+        help = "Feature group to hide (repeatable). Applied after --enable.",
+    ),
+):
+    """Run Unsloth Studio as an MCP server over stdio.
+
+    Exposes Studio's models, datasets, training, export and Data Designer
+    recipe features as MCP tools so any MCP client (Claude Desktop, Cursor,
+    Cline, ...) can drive Unsloth Studio directly. Reuses Studio's in-process
+    backend; long-running work (training, export, recipe) runs in the existing
+    subprocess backends and is surfaced as start / status / stop tools.
+
+    Connect from an MCP client with a config like::
+
+        {"mcpServers": {"unsloth-studio": {"command": "unsloth", "args": ["studio", "mcp"]}}}
+
+    For a read-only agent profile::
+
+        {"mcpServers": {"unsloth-studio": {"command": "unsloth", "args": ["studio", "mcp", "--enable", "models", "--enable", "data"]}}}
+    """
+    _ensure_studio_env_exported()
+
+    from unsloth_cli._inference import configure_quiet_logging, ensure_studio_backend_path
+
+    ensure_studio_backend_path()
+    configure_quiet_logging()
+
+    from mcp_server import run_stdio
+    from mcp_server.tools import resolve_groups
+
+    try:
+        selected = resolve_groups(enable, disable)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err = True)
+        raise typer.Exit(code = 2)
+
+    typer.echo(
+        f"Unsloth Studio MCP server (stdio) starting with groups: {', '.join(selected)}",
+        err = True,
+    )
+    run_stdio(enabled = selected)
+
+
+@studio_app.command("mcp-list-tools")
+def mcp_list_tools(
+    enable: List[str] = typer.Option(
+        None, "--enable", help = "Feature group to include (repeatable)."
+    ),
+    disable: List[str] = typer.Option(
+        None, "--disable", help = "Feature group to exclude (repeatable)."
+    ),
+):
+    """Print the MCP tools that would be exposed (dry-run, no server started)."""
+    _ensure_studio_env_exported()
+
+    from unsloth_cli._inference import ensure_studio_backend_path
+
+    ensure_studio_backend_path()
+
+    import asyncio
+
+    from mcp_server.server import list_tools
+    from mcp_server.tools import resolve_groups
+
+    try:
+        selected = resolve_groups(enable, disable)
+    except ValueError as exc:
+        typer.echo(f"Error: {exc}", err = True)
+        raise typer.Exit(code = 2)
+
+    tools = asyncio.run(list_tools(enabled = selected))
+    typer.echo(f"Groups: {', '.join(selected)}  ({len(tools)} tools)")
+    for tool in tools:
+        typer.echo(f"  {tool['name']:<26} [{tool['group']}]  {tool['description']}")
