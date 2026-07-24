@@ -179,14 +179,20 @@ def test_research_presentation_is_integrated() -> None:
 
 def test_research_plan_and_status_contract() -> None:
     types = source("features/chat/types/research.ts")
+    coordinator = source("features/chat/stores/research-run-store.ts")
     assert '| "queued"' in types
     assert '| "cancelling"' in types
+    assert '| "synthesis_audit"' in types
+    assert '| "synthesis_recovery"' in types
     assert "title: string;" in types
     assert "query: string;" in types
     assert "position: number;" in types
     assert "createdAt: number;" in types
     assert "planRevision: number;" in types
     assert "planHash: string | null;" in types
+    assert 'phase === "synthesis_audit"' in coordinator
+    assert '"Checking the evidence"' in coordinator
+    assert 'phase === "synthesis" || phase === "synthesis_recovery"' in coordinator
 
 
 def test_research_website_limits_are_configurable_and_sent_with_each_run() -> None:
