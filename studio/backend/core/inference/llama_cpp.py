@@ -32354,9 +32354,10 @@ class LlamaCppBackend:
                 _accumulated_predicted_ms += _it.get("predicted_ms", 0)
                 _accumulated_predicted_n += _it.get("predicted_n", 0)
 
-                # Collapse exact-duplicate calls and cap the count for the TEXTUAL
-                # fallback (mirrors the safetensors loop; see _MAX_TOOL_CALLS_PER_TURN).
-                if tool_calls and not has_structured_tc and len(tool_calls) > 1:
+                # Collapse repeating workspace blocks in either representation. Only the
+                # textual fallback has the 8-call cap; structured no-ops still reach the
+                # controller so adjacent repeats keep their existing loop guard.
+                if tool_calls and len(tool_calls) > 1:
                     _seen_keys: set = set()
                     _last_workspace_key = None
                     # A repeat is a verification, so it is worth running once per piece of new
@@ -32374,23 +32375,24 @@ class LlamaCppBackend:
                         if _fn.get("name") in _WORKSPACE_TOOLS:
                             # A workspace repeat only matters after a different workspace call.
                             if _key == _last_workspace_key:
-                                continue
-                            if _key in _seen_keys:
+                                if not has_structured_tc:
+                                    continue
+                            elif _key in _seen_keys:
                                 if _novel_kept <= _novel_at_last_keep.get(_key, 0):
                                     continue
                             else:
                                 _novel_kept += 1
                             _novel_at_last_keep[_key] = _novel_kept
                             _last_workspace_key = _key
-                        elif _key in _seen_keys:
+                        elif not has_structured_tc and _key in _seen_keys:
                             continue
                         _seen_keys.add(_key)
                         _deduped.append(_tc)
-                        if len(_deduped) >= _MAX_TOOL_CALLS_PER_TURN:
+                        if not has_structured_tc and len(_deduped) >= _MAX_TOOL_CALLS_PER_TURN:
                             break
                     if len(_deduped) != len(tool_calls):
                         logger.info(
-                            "GGUF textual fallback: collapsed %d repeated tool call(s) "
+                            "GGUF tool batch: collapsed %d repeated tool call(s) "
                             "in one turn to %d",
                             len(tool_calls),
                             len(_deduped),
