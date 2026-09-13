@@ -2029,11 +2029,10 @@ class ResearchSupervisor:
                         _report_after_boundary(fresh.get("report") or "", _REPORT_BOUNDARY_MARKER)
                         or ""
                     )
-                    partial_report = _validate_report_sources(
-                        partial_report, fresh.get("sources") or []
-                    )
-                    partial_report = _validate_report_document_sources(
-                        partial_report, fresh.get("documentSources") or []
+                    partial_report = _validate_report(
+                        partial_report,
+                        fresh.get("sources") or [],
+                        fresh.get("documentSources") or [],
                     ).strip()
                 actual_status = await asyncio.to_thread(
                     db.finish,

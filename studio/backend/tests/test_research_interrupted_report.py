@@ -95,6 +95,37 @@ def test_interrupted_report_validates_citations(research_home, monkeypatch):
     assert "Untrusted source list" not in run["report"]
 
 
+def test_interrupted_report_preserves_code_in_saved_chat(research_home, monkeypatch):
+    code = (
+        "```python\n"
+        'base_url = "http://localhost:8888/v1"\n'
+        'pattern = "[Document: generated]"\n'
+        "print(x.shape[1])\n"
+        "```"
+    )
+    raw = RAW + "\n\n" + code
+    run = _interrupt(monkeypatch, raw, httpx.ReadError("connection reset"))
+    assert run["status"] == "failed"
+    assert code in run["report"]
+    message = studio_db.get_chat_message(run["threadId"], run["assistantMessageId"])
+    text = "\n".join(part["text"] for part in message["content"] if part["type"] == "text")
+    assert code in text
+    assert "Incomplete report" in text
+
+
+def test_interrupted_report_does_not_reclassify_citations_after_url_removal(
+    research_home, monkeypatch
+):
+    raw = RAW + "\n\nContext\nhttps://nope.example\n    [Document: hallucinated]"
+    run = _interrupt(monkeypatch, raw, httpx.ReadError("connection reset"))
+    assert run["status"] == "failed"
+    assert "nope.example" not in run["report"]
+    assert "[Document: hallucinated]" not in run["report"]
+    message = studio_db.get_chat_message(run["threadId"], run["assistantMessageId"])
+    text = "\n".join(part["text"] for part in message["content"] if part["type"] == "text")
+    assert "[Document: hallucinated]" not in text
+
+
 @pytest.mark.parametrize("error", [worker.RunCancelled(), worker.LeaseLost()])
 def test_control_flow_interruptions_do_not_publish_partial_report(
     research_home, monkeypatch, error
