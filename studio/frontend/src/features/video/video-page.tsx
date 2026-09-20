@@ -103,6 +103,7 @@ import type {
 } from "@/features/model-picker/components/model-selector/types";
 import { ParamSlider } from "@/features/chat";
 import { ModelLoadDescription } from "@/features/chat/components/model-load-status";
+import { mediaModelLoadToastOptions } from "@/features/chat/lib/model-load-toast-options";
 import {
   MediaGenerationPresetControl,
   type VideoGenerationPresetParams,
@@ -341,14 +342,6 @@ function genStepLabel(p: VideoGenerateProgress): string {
   return eta ? `${base} · ~${eta}` : base;
 }
 
-// The chat tab's model-load toast styling, reused verbatim so the video load toast is identical.
-const LOAD_TOAST_CLASSNAMES = {
-  toast: "chat-model-load-toast items-center gap-2.5",
-  content: "gap-0.5 flex-1 min-w-0",
-  title: "leading-5",
-  description: "mt-0 w-full",
-} as const;
-
 // The download total for a video load can only be estimated from a companion base repo, so
 // the toast shows a byte count until the total is known.
 function loadFraction(p: VideoLoadProgress): number | null {
@@ -386,17 +379,16 @@ function loadToastDescription(p: VideoLoadProgress) {
 // control that reaches a load in flight: the selector's eject is hidden for that span.
 function loadToastArgs(
   p: VideoLoadProgress,
-  id?: string | number,
-  onCancel?: () => void,
+  id: string | number | undefined,
+  onCancel: (() => void) | undefined,
+  onHide: () => void,
 ) {
-  return {
-    ...(id != null ? { id } : {}),
+  return mediaModelLoadToastOptions({
+    id,
     description: loadToastDescription(p),
-    duration: Infinity,
-    closeButton: true,
-    ...(onCancel ? { cancel: { label: "Cancel", onClick: onCancel } } : {}),
-    classNames: LOAD_TOAST_CLASSNAMES,
-  };
+    onCancel,
+    onHide,
+  });
 }
 
 const IDLE_PROGRESS: VideoLoadProgress = {
@@ -2201,7 +2193,10 @@ function VideoGenerator({
       const sig = `${p.phase}:${p.downloaded_bytes}:${p.expected_bytes ?? 0}`;
       if (loadToastId.current != null && sig !== lastLoadSig.current) {
         lastLoadSig.current = sig;
-        toast(null, loadToastArgs(p, loadToastId.current, cancelLoadFromToast));
+        toast(
+          null,
+          loadToastArgs(p, loadToastId.current, cancelLoadFromToast, dismissLoadToast),
+        );
       }
     } catch {
       // Transient poll failure: keep trying.
@@ -2217,9 +2212,9 @@ function VideoGenerator({
     loadTrackingRestored.current = true;
     setBusy("loading");
     lastLoadSig.current = null;
-    loadToastId.current = toast(null, loadToastArgs(IDLE_PROGRESS, undefined, cancelLoadFromToast));
+    loadToastId.current = toast(null, loadToastArgs(IDLE_PROGRESS, undefined, cancelLoadFromToast, dismissLoadToast));
     void pollLoadProgress();
-  }, [pollLoadProgress, cancelLoadFromToast]);
+  }, [pollLoadProgress, cancelLoadFromToast, dismissLoadToast]);
 
   const stopGenPoll = useCallback(() => {
     if (genPollTimer.current) clearInterval(genPollTimer.current);
@@ -2301,7 +2296,7 @@ function VideoGenerator({
           setBusy("loading");
           dismissLoadToast();
           lastLoadSig.current = null;
-          loadToastId.current = toast(null, loadToastArgs(p, undefined, cancelLoadFromToast));
+          loadToastId.current = toast(null, loadToastArgs(p, undefined, cancelLoadFromToast, dismissLoadToast));
           void pollLoadProgress();
         }
       } catch {
@@ -2441,7 +2436,7 @@ function VideoGenerator({
       setBusy("loading");
       dismissLoadToast();
       lastLoadSig.current = null;
-      loadToastId.current = toast(null, loadToastArgs(IDLE_PROGRESS, undefined, cancelLoadFromToast));
+      loadToastId.current = toast(null, loadToastArgs(IDLE_PROGRESS, undefined, cancelLoadFromToast, dismissLoadToast));
       // Snapshot the prior Reapply target first: a load that fails to START leaves the previous model resident.
       const prevLastLoad = lastLoad.current;
       const prevCanReapply = canReapply;
@@ -4169,7 +4164,6 @@ function VideoGenerator({
               >
                 <div className="w-72 max-w-full rounded-xl bg-background/85 p-3 shadow-lg ring-1 ring-border backdrop-blur">
                   <ModelLoadDescription
-                    className="min-h-0"
                     title={null}
                     message="Starting…"
                     progressPercent={

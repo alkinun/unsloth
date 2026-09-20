@@ -99,6 +99,7 @@ import { useImageWorkflowStore } from "./stores/image-workflow-store";
 import { WORKFLOW_TABS, type WorkflowId } from "./workflows";
 import { ParamSlider } from "@/features/chat";
 import { ModelLoadDescription } from "@/features/chat/components/model-load-status";
+import { mediaModelLoadToastOptions } from "@/features/chat/lib/model-load-toast-options";
 import {
   type ImageGenerationPresetParams,
   MediaGenerationPresetControl,
@@ -524,14 +525,6 @@ async function settleLostGeneration(
   throw new Error("Timed out waiting for the image generation to finish.");
 }
 
-// The chat tab model-load toast styling, reused verbatim so the diffusion load toast is identical.
-const LOAD_TOAST_CLASSNAMES = {
-  toast: "chat-model-load-toast items-center gap-2.5",
-  content: "gap-0.5 flex-1 min-w-0",
-  title: "leading-5",
-  description: "mt-0 w-full",
-} as const;
-
 // Render the chat ModelLoadDescription for a progress poll. The base repo downloads alongside
 // the GGUF, so the total exceeds the quant size.
 function loadToastDescription(p: DiffusionLoadProgress) {
@@ -568,17 +561,16 @@ function loadToastDescription(p: DiffusionLoadProgress) {
 // span a first load runs, which left a multi-gigabyte pull with no way out.
 function loadToastArgs(
   p: DiffusionLoadProgress,
-  id?: string | number,
-  onCancel?: () => void,
+  id: string | number | undefined,
+  onCancel: (() => void) | undefined,
+  onHide: () => void,
 ) {
-  return {
-    ...(id != null ? { id } : {}),
+  return mediaModelLoadToastOptions({
+    id,
     description: loadToastDescription(p),
-    duration: Infinity,
-    closeButton: true,
-    ...(onCancel ? { cancel: { label: "Cancel", onClick: onCancel } } : {}),
-    classNames: LOAD_TOAST_CLASSNAMES,
-  };
+    onCancel,
+    onHide,
+  });
 }
 
 const IDLE_PROGRESS: DiffusionLoadProgress = {
@@ -2227,7 +2219,10 @@ export function ImagesPage({
       const sig = `${p.phase}:${p.bytes_downloaded}:${p.bytes_total}`;
       if (loadToastId.current != null && sig !== lastLoadSig.current) {
         lastLoadSig.current = sig;
-        toast(null, loadToastArgs(p, loadToastId.current, cancelLoadFromToast));
+        toast(
+          null,
+          loadToastArgs(p, loadToastId.current, cancelLoadFromToast, dismissLoadToast),
+        );
       }
     } catch {
       // Transient poll failure: keep trying.
@@ -2243,9 +2238,9 @@ export function ImagesPage({
     loadTrackingRestored.current = true;
     setBusy("loading");
     lastLoadSig.current = null;
-    loadToastId.current = toast(null, loadToastArgs(IDLE_PROGRESS, undefined, cancelLoadFromToast));
+    loadToastId.current = toast(null, loadToastArgs(IDLE_PROGRESS, undefined, cancelLoadFromToast, dismissLoadToast));
     void pollLoadProgress();
-  }, [pollLoadProgress, cancelLoadFromToast]);
+  }, [pollLoadProgress, cancelLoadFromToast, dismissLoadToast]);
 
   // Re-enter the per-step poll for a generation in flight that this page did not start.
   // generate-progress carries no terminal record, so refresh the gallery on completion.
@@ -2301,7 +2296,7 @@ export function ImagesPage({
           setBusy("loading");
           dismissLoadToast();
           lastLoadSig.current = null;
-          loadToastId.current = toast(null, loadToastArgs(p, undefined, cancelLoadFromToast));
+          loadToastId.current = toast(null, loadToastArgs(p, undefined, cancelLoadFromToast, dismissLoadToast));
           void pollLoadProgress();
         }
       } catch {
@@ -2475,7 +2470,7 @@ export function ImagesPage({
       // Show the chat-style toast immediately; the poll updates it by id.
       dismissLoadToast();
       lastLoadSig.current = null;
-      loadToastId.current = toast(null, loadToastArgs(IDLE_PROGRESS, undefined, cancelLoadFromToast));
+      loadToastId.current = toast(null, loadToastArgs(IDLE_PROGRESS, undefined, cancelLoadFromToast, dismissLoadToast));
       // Remember what was loaded so "Reapply" can reload it. Snapshot the prior target first: a load
       // that fails to START leaves the previous model resident.
       const prevLastLoad = lastLoad.current;
@@ -4671,8 +4666,6 @@ export function ImagesPage({
               >
                 <div className="w-72 max-w-full rounded-xl bg-background/85 p-3 shadow-lg ring-1 ring-border backdrop-blur">
                   <ModelLoadDescription
-                    // Drop the chat min-height: this floating card has no layout to stabilise.
-                    className="min-h-0"
                     title={
                       genDone != null && count > 1
                         ? `Run ${genDone + 1}/${count}`
